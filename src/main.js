@@ -177,7 +177,7 @@ async function syncNow() {
     const localChanged = stable(core(merged)) !== stable(core(DB));
     DB = { ...DB, ...merged };
     saveLocal();
-    if (localChanged) { fromDB(); render(); if (S.detailId && sheetEl && !sheetEl.contains(document.activeElement)) renderDetail(); }
+    if (localChanged) { fromDB(); watchCal(); render(); if (S.detailId && sheetEl && !sheetEl.contains(document.activeElement)) renderDetail(); }
     if (!remote || stable(core(remote)) !== stable(core(DB))) await driveUpload({ v: 1, savedAt: Date.now(), ...core(DB) });
     lastSync = Date.now(); S.dbState = 'synced'; S.dbErr = null;
   } catch (e) {
@@ -245,7 +245,7 @@ function normEvent(e) {
   if (String(e.status || '').toLowerCase() === 'cancelled') return null;
   return {
     id: e.id || e.eventId || '', title: e.summary || e.title || '(No title)', start: s.d, end: en.d,
-    allDay: e.allDay ?? s.allDay, location: e.location || '', link: e.htmlLink || e.url || e.link || '',
+    allDay: e.allDay ?? s.allDay, location: e.location || '', link: e.htmlLink || e.url || e.link || '', cal: e._cal || 'primary',
     declined: Array.isArray(e.attendees) && e.attendees.some(a => a && a.self && a.responseStatus === 'declined')
   };
 }
@@ -265,6 +265,7 @@ function onCalEvent(ev) {
   if (ev.type === 'data') {
     S.events = extractEvents(ev.result.payload !== undefined ? ev.result.payload : ev.result);
     S.calState = 'ok'; S.calErr = null; S.calAt = (ev.result.cache && ev.result.cache.storedAt) || Date.now();
+    S.calFailed = (ev.result.payload && ev.result.payload.failed) || [];
   } else {
     const e = ev.error || {};
     if (DENIALS.includes(e.code)) S.events = [];
@@ -274,10 +275,10 @@ function onCalEvent(ev) {
 }
 function watchCal(force) {
   if (!mcp) return;
-  const [a, b] = calWindow(); const key = ymd(a) + '_' + ymd(b);
+  const [a, b] = calWindow(); const extra = (S.settings.extraCalendars || []).filter(Boolean); const key = ymd(a) + '_' + ymd(b) + '_' + extra.join(',');
   if (key === calKey && !force) return;
   calKey = key; if (unwatch) unwatch();
-  calInput = { startTime: localIso(a), endTime: localIso(b), orderBy: 'startTime', pageSize: 250 };
+  calInput = { startTime: localIso(a), endTime: localIso(b), orderBy: 'startTime', pageSize: 250, calendars: extra };
   try { unwatch = mcp.watchTool(CAL, 'list_events', calInput, onCalEvent, { refetchInterval: 120000, cache: { staleTime: 60000, gcTime: DAY } }); }
   catch (e) { S.calState = 'error'; S.calErr = { code: 'bad_request', message: String(e) }; render(); }
 }
@@ -334,7 +335,7 @@ async function createEvent({ title, start, end, allDay, popupAt, recurrence, des
 }
 async function deleteEvent(ev) {
   try {
-    await mcp.callTool(CAL, 'delete_event', { eventId: ev.id });
+    await mcp.callTool(CAL, 'delete_event', { eventId: ev.id, calendarId: ev.cal || 'primary' });
     S.events = S.events.filter(x => x !== ev); render();
     toast('Event deleted');
     mcp.invalidate(CAL, 'list_events').catch(() => {});
@@ -989,9 +990,9 @@ function openSchedule(id, anchor) {
 function openEvent(ev, anchor) {
   const when = ev.allDay ? `${dayLabel(ymd(ev.start))} · all day` : `${dayLabel(ymd(ev.start))} · ${hm(ev.start)}–${hm(ev.end)}`;
   const safeLink = /^https:\/\//.test(ev.link) ? ev.link : '';
-  const p = openPop(`<h3>${esc(ev.title)}</h3><div class="pmeta">${esc(when)}${ev.location ? '<br>' + esc(ev.location) : ''}</div>
+  const p = openPop(`<h3>${esc(ev.title)}</h3><div class="pmeta">${esc(when)}${ev.location ? '<br>' + esc(ev.location) : ''}${ev.cal && ev.cal !== 'primary' ? '<br><span style="font-size:13px">from ' + esc(ev.cal) + '</span>' : ''}</div>
     <div class="pacts">${safeLink ? `<a href="${esc(safeLink)}" target="_blank" rel="noopener">Open in Google Calendar ↗</a>` : ''}
-    ${ev.id && !ev.pending ? '<button class="btn danger" data-x="del">Delete</button>' : ''}<button class="btn" data-x="close">Close</button></div>`, anchor);
+    ${ev.id && !ev.pending && (ev.cal || 'primary') === 'primary' ? '<button class="btn danger" data-x="del">Delete</button>' : ''}<button class="btn" data-x="close">Close</button></div>`, anchor);
   p.querySelector('[data-x=close]').addEventListener('click', closePop);
   const del = p.querySelector('[data-x=del]');
   if (del) del.addEventListener('click', () => {
@@ -1006,9 +1007,15 @@ async function openAccount(anchor) {
   const p = openPop(`<h3>${on ? 'Google account' : 'Not connected'}</h3>
     <div class="pmeta">${on ? esc(em || 'Connected') : 'Everything is saved on this device. Connect Google to sync with your other devices and use your calendar.'}</div>
     ${on ? `<div class="pmeta" style="font-size:14px">${esc(statusText())}${lastSync ? '<br>Last sync ' + hm(new Date(lastSync)) : ''}</div>` : ''}
+    ${on ? `<div class="sh-l" style="margin-top:14px">Also show these calendars</div>
+      <input class="sh-in" id="extraCals" value="${esc((S.settings.extraCalendars || []).join(', '))}" placeholder="e.g. name@unitn.it" style="margin-bottom:6px">
+      <div style="font-size:13px;color:var(--muted);margin-bottom:12px">Calendar IDs, comma-separated — a shared calendar's ID is usually its email address.${(S.calFailed || []).length ? `<br><b style="color:var(--warn)">Can’t read: ${esc(S.calFailed.join(', '))}</b> — is it shared with this account?` : ''}</div>` : ''}
     <div class="pacts">${on ? '<button class="btn danger" data-x="out">Disconnect</button><button class="btn" data-x="sync">Sync now</button>' : ''}
     <button class="btn primary" data-x="in">${on ? 'Reconnect' : 'Connect Google'}</button></div>`, anchor);
   p.querySelector('[data-x=in]').addEventListener('click', () => { closePop(); doConnect(); });
+  const xc = p.querySelector('#extraCals');
+  if (xc) { const save = () => { const v = xc.value.split(',').map(x => x.trim()).filter(Boolean); if (v.join(',') !== (S.settings.extraCalendars || []).join(',')) { saveSettings({ extraCalendars: v }); watchCal(true); toast(v.length ? 'Calendars updated' : 'Showing only your main calendar'); } };
+    xc.addEventListener('change', save); xc.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); xc.blur(); } }); }
   const sy = p.querySelector('[data-x=sync]'); if (sy) sy.addEventListener('click', () => { closePop(); syncNow().then(() => toast(S.dbState === 'synced' ? 'Synced' : statusText())); calendar.refresh(); });
   const out = p.querySelector('[data-x=out]'); if (out) out.addEventListener('click', () => {
     if (!out.classList.contains('armed')) { out.classList.add('armed'); out.textContent = 'Confirm'; return; } closePop(); doDisconnect(); });

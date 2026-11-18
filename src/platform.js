@@ -96,7 +96,8 @@ export async function accountEmail(refresh) {
 }
 
 /* ---------------- Google Calendar adapter (same shape as the old connector) ---------------- */
-const CALAPI = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const calUrl = cal => 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(cal) + '/events';
+const CALAPI = calUrl('primary');
 const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Rome';
 const toRfc = local => new Date(local).toISOString();
 function when(local, allDay) { return allDay ? { date: local.slice(0, 10) } : { dateTime: local, timeZone: TZ }; }
@@ -105,8 +106,21 @@ export const calendar = {
   async callTool(_server, tool, input) {
     if (tool === 'list_events') {
       const q = new URLSearchParams({ timeMin: toRfc(input.startTime), timeMax: toRfc(input.endTime), singleEvents: 'true', orderBy: 'startTime', maxResults: String(input.pageSize || 250) });
-      const r = await gfetch(CALAPI + '?' + q); const j = await r.json();
-      return { payload: { events: j.items || [] } };
+      const cals = ['primary', ...(input.calendars || [])];
+      const seen = new Set(), events = [], failed = [];
+      for (const cal of cals) {
+        try {
+          const r = await gfetch(calUrl(cal) + '?' + q);
+          if (r.status === 404) { failed.push(cal); continue; }
+          const j = await r.json();
+          for (const e of (j.items || [])) {
+            const key = e.iCalUID ? e.iCalUID + '|' + JSON.stringify(e.start) : e.id + cal;
+            if (seen.has(key)) continue; seen.add(key);
+            events.push({ ...e, _cal: cal });
+          }
+        } catch (err) { if (cal === 'primary') throw err; failed.push(cal); }
+      }
+      return { payload: { events, failed } };
     }
     if (tool === 'create_event') {
       const body = { summary: input.summary, start: when(input.startTime, input.allDay), end: when(input.endTime, input.allDay) };
@@ -126,7 +140,7 @@ export const calendar = {
       return { payload: await r.json() };
     }
     if (tool === 'delete_event') {
-      await gfetch(CALAPI + '/' + encodeURIComponent(input.eventId), { method: 'DELETE' });
+      await gfetch(calUrl(input.calendarId || 'primary') + '/' + encodeURIComponent(input.eventId), { method: 'DELETE' });
       return { payload: { deleted: true } };
     }
     throw Object.assign(new Error('unknown tool ' + tool), { code: 'bad_request' });
