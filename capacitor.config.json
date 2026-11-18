@@ -1,0 +1,9 @@
+{
+  "appId": "com.valerio.flow",
+  "appName": "Flow",
+  "webDir": "www",
+  "android": { "backgroundColor": "#FAFAF8" },
+  "plugins": {
+    "LocalNotifications": { "smallIcon": "ic_stat_flow", "iconColor": "#3D5A50" }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "flow",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flow — personal dashboard: capture, to-dos, appointments, zones, morning review",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --outfile=www/app.js --minify --sourcemap",
+    "dev": "esbuild src/main.js --bundle --format=iife --target=es2020 --outfile=www/app.js --sourcemap --watch"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.6.2",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.2",
+    "@capacitor/local-notifications": "8.3.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.6.2",
+    "esbuild": "0.28.2"
+  }
+}

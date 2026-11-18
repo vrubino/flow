@@ -1,0 +1,90 @@
+name: Build Flow
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-flow
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android app (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install and bundle the web app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy web app into the Android project
+        run: npx cap sync android
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then echo "::error::Add the KEYSTORE_B64 secret (see SETUP.md, step 3)"; exit 1; fi
+          echo "$KEYSTORE_B64" | base64 -d > android/app/flow-release.keystore
+
+      - name: Build signed APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleRelease --no-daemon --stacktrace
+          cp app/build/outputs/apk/release/app-release.apk ../Flow.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Flow-apk
+          path: Flow.apk
+
+      - name: Publish to the "latest" release (direct download link for your phone)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Flow.apk --title "Flow — latest build" \
+            --notes "Build ${{ github.run_number }} · install Flow.apk on your Android phone (it updates the existing app)." --latest
+
+  web:
+    name: Laptop version (GitHub Pages)
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci && npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: www
+      - id: deploy
+        uses: actions/deploy-pages@v4
