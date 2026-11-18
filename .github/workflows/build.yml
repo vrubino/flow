@@ -32,6 +32,9 @@ jobs:
           java-version: 21
 
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install and bundle the web app
         run: |
@@ -42,13 +45,20 @@ jobs:
         run: npx cap sync android
 
       - name: Restore signing key
+        id: key
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          if [ -z "$KEYSTORE_B64" ]; then echo "::error::Add the KEYSTORE_B64 secret (see SETUP.md, step 3)"; exit 1; fi
-          echo "$KEYSTORE_B64" | base64 -d > android/app/flow-release.keystore
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::KEYSTORE_B64 secret missing — building an unsigned test build only (see SETUP.md, step 3)"
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$KEYSTORE_B64" | base64 -d > android/app/flow-release.keystore
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build signed APK
+        if: steps.key.outputs.signed == 'true'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
@@ -56,12 +66,20 @@ jobs:
           cd android && ./gradlew assembleRelease --no-daemon --stacktrace
           cp app/build/outputs/apk/release/app-release.apk ../Flow.apk
 
+      - name: Test build (no signing key yet)
+        if: steps.key.outputs.signed != 'true'
+        run: |
+          chmod +x android/gradlew
+          cd android && ./gradlew assembleDebug --no-daemon --stacktrace
+          cp app/build/outputs/apk/debug/app-debug.apk ../Flow.apk
+
       - uses: actions/upload-artifact@v4
         with:
           name: Flow-apk
           path: Flow.apk
 
       - name: Publish to the "latest" release (direct download link for your phone)
+        if: steps.key.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
