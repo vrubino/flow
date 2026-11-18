@@ -1005,7 +1005,7 @@ async function openAccount(anchor) {
   const em = on ? (S.account || await accountEmail()) : '';
   const p = openPop(`<h3>${on ? 'Google account' : 'Not connected'}</h3>
     <div class="pmeta">${on ? esc(em || 'Connected') : 'Everything is saved on this device. Connect Google to sync with your other devices and use your calendar.'}</div>
-    <div class="pmeta" style="font-size:14px">${esc(statusText())}${lastSync ? '<br>Last sync ' + hm(new Date(lastSync)) : ''}</div>
+    ${on ? `<div class="pmeta" style="font-size:14px">${esc(statusText())}${lastSync ? '<br>Last sync ' + hm(new Date(lastSync)) : ''}</div>` : ''}
     <div class="pacts">${on ? '<button class="btn danger" data-x="out">Disconnect</button><button class="btn" data-x="sync">Sync now</button>' : ''}
     <button class="btn primary" data-x="in">${on ? 'Reconnect' : 'Connect Google'}</button></div>`, anchor);
   p.querySelector('[data-x=in]').addEventListener('click', () => { closePop(); doConnect(); });
