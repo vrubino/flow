@@ -92,8 +92,8 @@ public class GoogleAuthPlugin extends Plugin {
         pendingCallId = null;
         if (call == null) return;
         bridge.releaseCall(call);
-        if (activityResult.getResultCode() != Activity.RESULT_OK) {
-            call.reject("Sign-in cancelled", "cancelled");
+        if (activityResult.getData() == null) {
+            call.reject("Sign-in cancelled (result " + activityResult.getResultCode() + ", no details)", "cancelled");
             return;
         }
         try {
@@ -101,7 +101,10 @@ public class GoogleAuthPlugin extends Plugin {
                 .getAuthorizationResultFromIntent(activityResult.getData());
             resolveWith(call, result);
         } catch (ApiException e) {
-            call.reject("Google authorization failed: " + e.getStatusCode(), "auth_failed");
+            int code = e.getStatusCode();
+            String hint = code == 10 ? " — the Android OAuth client (package name / SHA-1) is missing or doesn't match"
+                : code == 16 ? " — cancelled" : code == 7 ? " — no network" : "";
+            call.reject("Google authorization failed: code " + code + hint, code == 16 ? "cancelled" : "auth_failed");
         }
     }
 

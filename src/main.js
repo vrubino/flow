@@ -209,7 +209,7 @@ async function doConnect() {
     await syncNow(); initCal(true); pushPendingAppts();
     if (isNative && S.settings.reviewLocal) scheduleReview(S.settings.reviewTime || '08:30');
   } catch (e) {
-    toast(e && e.code === 'not_configured' ? 'Add your Web client ID in config.js first (see SETUP.md).' : e && e.code === 'cancelled' ? 'Sign-in cancelled' : 'Google sign-in failed: ' + ((e && e.message) || e));
+    toast(e && e.code === 'not_configured' ? 'Add your Web client ID in config.js first (see SETUP.md).' : (e && e.message) || ('Google sign-in failed: ' + e));
   }
   render();
 }
